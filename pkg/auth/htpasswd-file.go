@@ -52,15 +52,13 @@ func NewHtpasswdFromFile(path string) (*HtpasswdFile, error) {
 }
 
 // Validate HTTP request credentials
-func (h *HtpasswdFile) Validate(r *http.Request) bool {
-	user, passwd, ok := r.BasicAuth()
-	if !ok {
-		return false
-	}
-	return h.validateCredentials(user, passwd)
+func (h *HtpasswdFile) Validate(r *http.Request) (ok bool, username string) {
+	username, password, ok := r.BasicAuth()
+	ok = ok && h.validateCredentials(username, password)
+	return
 }
 
-func (h *HtpasswdFile) validateCredentials(user string, password string) bool {
+func (h *HtpasswdFile) validateCredentials(user, password string) bool {
 	pwd, exists := h.users[user]
 	if !exists {
 		return false

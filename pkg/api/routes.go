@@ -1,14 +1,16 @@
 package api
 
 import (
+	"log/slog"
+
 	"github.com/ncarlier/webhookd/pkg/auth"
 	"github.com/ncarlier/webhookd/pkg/config"
-	"github.com/ncarlier/webhookd/pkg/logger"
 	"github.com/ncarlier/webhookd/pkg/middleware"
-	"github.com/ncarlier/webhookd/pkg/pubkey"
+	"github.com/ncarlier/webhookd/pkg/truststore"
 )
 
 var commonMiddlewares = middleware.Middlewares{
+	middleware.XFF,
 	middleware.Cors,
 	middleware.Logger,
 	middleware.Tracing(nextRequestID),
@@ -16,23 +18,23 @@ var commonMiddlewares = middleware.Middlewares{
 
 func buildMiddlewares(conf *config.Config) middleware.Middlewares {
 	var middlewares = commonMiddlewares
-	if conf.TLS {
+	if conf.TLS.Enabled {
 		middlewares = middlewares.UseAfter(middleware.HSTS)
 	}
 
 	// Load trust store...
-	trustStore, err := pubkey.NewTrustStore(conf.TrustStoreFile)
+	ts, err := truststore.New(conf.TruststoreFile)
 	if err != nil {
-		logger.Warning.Printf("unable to load trust store (\"%s\"): %s\n", conf.TrustStoreFile, err)
+		slog.Warn("unable to load trust store", "filename", conf.TruststoreFile, "err", err)
 	}
-	if trustStore != nil {
-		middlewares = middlewares.UseAfter(middleware.HTTPSignature(trustStore))
+	if ts != nil {
+		middlewares = middlewares.UseAfter(middleware.Signature(ts))
 	}
 
 	// Load authenticator...
 	authenticator, err := auth.NewHtpasswdFromFile(conf.PasswdFile)
 	if err != nil {
-		logger.Debug.Printf("unable to load htpasswd file (\"%s\"): %s\n", conf.PasswdFile, err)
+		slog.Debug("unable to load htpasswd file", "filename", conf.PasswdFile, "err", err)
 	}
 	if authenticator != nil {
 		middlewares = middlewares.UseAfter(middleware.AuthN(authenticator))
@@ -42,15 +44,16 @@ func buildMiddlewares(conf *config.Config) middleware.Middlewares {
 
 func routes(conf *config.Config) Routes {
 	middlewares := buildMiddlewares(conf)
+	staticPath := conf.Static.Path + "/"
 	return Routes{
 		route(
 			"/",
 			index,
-			middlewares.UseBefore(middleware.Methods("GET", "POST"))...,
+			middlewares...,
 		),
 		route(
-			"/static/",
-			static("/static/"),
+			staticPath,
+			static(staticPath),
 			middlewares.UseBefore(middleware.Methods("GET"))...,
 		),
 		route(

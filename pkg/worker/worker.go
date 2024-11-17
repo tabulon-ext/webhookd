@@ -2,20 +2,18 @@ package worker
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/ncarlier/webhookd/pkg/metric"
-
-	"github.com/ncarlier/webhookd/pkg/logger"
-	"github.com/ncarlier/webhookd/pkg/model"
 	"github.com/ncarlier/webhookd/pkg/notification"
 )
 
 // NewWorker creates, and returns a new Worker object.
-func NewWorker(id int, workerQueue chan chan model.WorkRequest) Worker {
+func NewWorker(id int, workerQueue chan chan Work) Worker {
 	// Create, and return the worker.
 	worker := Worker{
 		ID:          id,
-		Work:        make(chan model.WorkRequest),
+		Work:        make(chan Work),
 		WorkerQueue: workerQueue,
 		QuitChan:    make(chan bool),
 	}
@@ -26,8 +24,8 @@ func NewWorker(id int, workerQueue chan chan model.WorkRequest) Worker {
 // Worker is a go routine in charge of executing a work.
 type Worker struct {
 	ID          int
-	Work        chan model.WorkRequest
-	WorkerQueue chan chan model.WorkRequest
+	Work        chan Work
+	WorkerQueue chan chan Work
 	QuitChan    chan bool
 }
 
@@ -42,19 +40,19 @@ func (w Worker) Start() {
 			select {
 			case work := <-w.Work:
 				// Receive a work request.
-				logger.Debug.Printf("worker #%d received hook request: %s#%d\n", w.ID, work.Name, work.ID)
+				slog.Debug("hook execution request received", "worker", w.ID, "hook", work.Name(), "id", work.ID())
 				metric.Requests.Add(1)
-				err := Run(&work)
+				err := work.Run()
 				if err != nil {
 					metric.RequestsFailed.Add(1)
-					work.MessageChan <- []byte(fmt.Sprintf("error: %s", err.Error()))
+					work.SendMessage(fmt.Sprintf("error: %s", err.Error()))
 				}
 				// Send notification
-				go notification.Notify(&work)
+				go notification.Notify(work)
 
-				close(work.MessageChan)
+				work.Close()
 			case <-w.QuitChan:
-				logger.Debug.Printf("stopping worker #%d...\n", w.ID)
+				slog.Debug("stopping worker...", "worker", w.ID)
 				return
 			}
 		}

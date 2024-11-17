@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/user"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/ncarlier/webhookd/pkg/api"
 	"github.com/ncarlier/webhookd/pkg/config"
-	"github.com/ncarlier/webhookd/pkg/logger"
 
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -17,7 +17,7 @@ import (
 func cacheDir() (dir string) {
 	if u, _ := user.Current(); u != nil {
 		dir = filepath.Join(os.TempDir(), "webhookd-acme-cache-"+u.Username)
-		if err := os.MkdirAll(dir, 0700); err == nil {
+		if err := os.MkdirAll(dir, 0o700); err == nil {
 			return dir
 		}
 	}
@@ -48,24 +48,25 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // NewServer create new HTTP(s) server
 func NewServer(cfg *config.Config) *Server {
+	logger := slog.NewLogLogger(slog.Default().Handler(), slog.LevelError)
 	server := &Server{
-		tls: cfg.TLS,
+		tls: cfg.TLS.Enabled,
 		self: &http.Server{
 			Addr:     cfg.ListenAddr,
 			Handler:  api.NewRouter(cfg),
-			ErrorLog: logger.Error,
+			ErrorLog: logger,
 		},
 	}
 	if server.tls {
 		// HTTPs server
-		if cfg.TLSDomain == "" {
-			server.certFile = cfg.TLSCertFile
-			server.keyFile = cfg.TLSKeyFile
+		if cfg.TLS.Domain == "" {
+			server.certFile = cfg.TLS.CertFile
+			server.keyFile = cfg.TLS.KeyFile
 		} else {
 			m := &autocert.Manager{
 				Cache:      autocert.DirCache(cacheDir()),
 				Prompt:     autocert.AcceptTOS,
-				HostPolicy: autocert.HostWhitelist(cfg.TLSDomain),
+				HostPolicy: autocert.HostWhitelist(cfg.TLS.Domain),
 			}
 			server.self.TLSConfig = m.TLSConfig()
 			server.certFile = ""

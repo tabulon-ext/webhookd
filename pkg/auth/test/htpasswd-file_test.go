@@ -13,11 +13,15 @@ func TestValidateCredentials(t *testing.T) {
 	assert.Nil(t, err, ".htpasswd file should be loaded")
 	assert.NotNil(t, htpasswdFile, ".htpasswd file should be loaded")
 
-	req, err := http.NewRequest("POST", "http://localhost:8080", nil)
+	req, err := http.NewRequest("POST", "http://localhost:8080", http.NoBody)
 	assert.Nil(t, err, "")
 	req.SetBasicAuth("foo", "bar")
-	assert.Equal(t, true, htpasswdFile.Validate(req), "credentials should be valid")
+	ok, username := htpasswdFile.Validate(req)
+	assert.Equal(t, true, ok, "credentials should be valid")
+	assert.Equal(t, "foo", username, "invalid username")
 
 	req.SetBasicAuth("foo", "bad")
-	assert.Equal(t, false, htpasswdFile.Validate(req), "credentials should not be valid")
+	ok, username = htpasswdFile.Validate(req)
+	assert.Equal(t, false, ok, "credentials should be invalid")
+	assert.Equal(t, "foo", username, "invalid username")
 }

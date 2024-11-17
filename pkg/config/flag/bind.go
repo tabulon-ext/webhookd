@@ -9,11 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncarlier/webhookd/pkg/strcase"
+	"github.com/ncarlier/webhookd/pkg/helper"
 )
 
 // Bind conf struct tags with flags
-func Bind(conf interface{}, prefix string) error {
+func Bind(conf interface{}, envPrefix string) error {
+	return bind(conf, envPrefix, "")
+}
+
+func bind(conf interface{}, envPrefix, keyPrefix string) error {
 	rv := reflect.ValueOf(conf)
 	for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
 		rv = rv.Elem()
@@ -40,14 +44,13 @@ func Bind(conf interface{}, prefix string) error {
 			val = tag
 		}
 
-		// Get field value and description from environment variable
-		if fieldType.Type.Kind() == reflect.Slice {
-			val = getEnvValue(prefix, key+"s", val)
-			desc = getEnvDesc(prefix, key+"s", desc)
-		} else {
-			val = getEnvValue(prefix, key, val)
-			desc = getEnvDesc(prefix, key, desc)
+		if keyPrefix != "" {
+			key = keyPrefix + "-" + key
 		}
+
+		// Get field value and description from environment variable
+		val = getEnvValue(envPrefix, key, val)
+		desc = getEnvDesc(envPrefix, key, desc)
 
 		// Get field value by reflection from struct definition
 		// And bind value to command line flag
@@ -59,7 +62,7 @@ func Bind(conf interface{}, prefix string) error {
 		case reflect.Bool:
 			bVal, err := strconv.ParseBool(val)
 			if err != nil {
-				return fmt.Errorf("Invalid boolean value for %s: %v", key, err)
+				return fmt.Errorf("invalid boolean value for %s: %v", key, err)
 			}
 			field.SetBool(bVal)
 			ptr, _ := field.Addr().Interface().(*bool)
@@ -68,7 +71,7 @@ func Bind(conf interface{}, prefix string) error {
 			if field.Kind() == reflect.Int64 && field.Type().PkgPath() == "time" && field.Type().Name() == "Duration" {
 				d, err := time.ParseDuration(val)
 				if err != nil {
-					return fmt.Errorf("Invalid duration value for %s: %v", key, err)
+					return fmt.Errorf("invalid duration value for %s: %v", key, err)
 				}
 				field.SetInt(int64(d))
 				ptr, _ := field.Addr().Interface().(*time.Duration)
@@ -76,26 +79,26 @@ func Bind(conf interface{}, prefix string) error {
 			} else {
 				i64Val, err := strconv.ParseInt(val, 0, fieldType.Type.Bits())
 				if err != nil {
-					return fmt.Errorf("Invalid number value for %s: %v", key, err)
+					return fmt.Errorf("invalid number value for %s: %v", key, err)
 				}
 				field.SetInt(i64Val)
 				ptr, _ := field.Addr().Interface().(*int)
 				flag.IntVar(ptr, key, int(i64Val), desc)
 			}
+		case reflect.Struct:
+			if err := bind(field.Addr().Interface(), envPrefix, key); err != nil {
+				return fmt.Errorf("invalid struct value for %s: %v", key, err)
+			}
 		case reflect.Slice:
 			sliceType := field.Type().Elem()
 			if sliceType.Kind() == reflect.String {
-				if len(strings.TrimSpace(val)) != 0 {
-					vals := strings.Split(val, ",")
-					sl := make([]string, len(vals), len(vals))
-					for i, v := range vals {
-						sl[i] = v
-					}
-					field.Set(reflect.ValueOf(sl))
-					ptr, _ := field.Addr().Interface().(*[]string)
-					af := newArrayFlags(ptr)
-					flag.Var(af, key, desc)
-				}
+				vals := strings.Split(val, ",")
+				sl := make([]string, len(vals))
+				copy(sl, vals)
+				field.Set(reflect.ValueOf(sl))
+				ptr, _ := field.Addr().Interface().(*[]string)
+				af := newArrayFlags(ptr)
+				flag.Var(af, key, desc)
 			}
 		}
 	}
@@ -103,7 +106,7 @@ func Bind(conf interface{}, prefix string) error {
 }
 
 func getEnvKey(prefix, key string) string {
-	return strcase.ToScreamingSnake(prefix + "_" + key)
+	return helper.ToScreamingSnake(prefix + "_" + key)
 }
 
 func getEnvValue(prefix, key, fallback string) string {
