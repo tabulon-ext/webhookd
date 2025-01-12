@@ -1,13 +1,11 @@
 .SILENT :
 
-export GO111MODULE=on
-
 # App name
 APPNAME=webhookd
 
 # Go configuration
-GOOS?=linux
-GOARCH?=amd64
+GOOS?=$(shell go env GOHOSTOS)
+GOARCH?=$(shell go env GOHOSTARCH)
 
 # Add exe extension if windows target
 is_windows:=$(filter windows,$(GOOS))
@@ -21,13 +19,14 @@ EXECUTABLE=$(APPNAME)$(EXT)
 
 # Extract version infos
 PKG_VERSION:=github.com/ncarlier/$(APPNAME)/pkg/version
-VERSION:=`git describe --always --dirty`
+VERSION:=`git describe --always --tags --dirty`
 GIT_COMMIT:=`git rev-list -1 HEAD --abbrev-commit`
 BUILT:=`date`
 define LDFLAGS
 -X '$(PKG_VERSION).Version=$(VERSION)' \
 -X '$(PKG_VERSION).GitCommit=$(GIT_COMMIT)' \
--X '$(PKG_VERSION).Built=$(BUILT)'
+-X '$(PKG_VERSION).Built=$(BUILT)' \
+-s -w -buildid=
 endef
 
 all: build
@@ -45,14 +44,37 @@ clean:
 ## Build executable
 build:
 	-mkdir -p release
-	echo "Building: $(EXECUTABLE) $(VERSION) for $(GOOS)-$(GOARCH) ..."
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "$(LDFLAGS)" -o release/$(EXECUTABLE)
+	echo ">>> Building: $(EXECUTABLE) $(VERSION) for $(GOOS)-$(GOARCH) ..."
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -tags osusergo,netgo -ldflags "$(LDFLAGS)" -o release/$(EXECUTABLE)
 .PHONY: build
 
 release/$(EXECUTABLE): build
 
+# Check code style
+check-style:
+	echo ">>> Checking code style..."
+	go vet ./...
+	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+.PHONY: check-style
+
+# Check code criticity
+check-criticity:
+	echo ">>> Checking code criticity..."
+	go run github.com/go-critic/go-critic/cmd/gocritic@latest check -enableAll ./...
+.PHONY: check-criticity
+
+# Check code security
+check-security:
+	echo ">>> Checking code security..."
+	go run github.com/securego/gosec/v2/cmd/gosec@latest -quiet ./...
+.PHONY: check-security
+
+## Code quality checks
+checks: check-style check-criticity
+.PHONY: checks
+
 ## Run tests
-test:
+test: 
 	go test ./...
 .PHONY: test
 
@@ -65,16 +87,15 @@ install: release/$(EXECUTABLE)
 ## Create Docker image
 image:
 	echo "Building Docker image ..."
-	docker build --rm -t ncarlier/$(APPNAME) .
+	docker build --rm --target slim -t ncarlier/$(APPNAME) .
 .PHONY: image
 
-## Generate changelog
-changelog:
+# Generate changelog
+CHANGELOG.md:
 	standard-changelog --first-release
-.PHONY: changelog
 
 ## Create archive
-archive: release/$(EXECUTABLE)
+archive: release/$(EXECUTABLE) CHANGELOG.md
 	echo "Creating release/$(ARCHIVE) archive..."
 	tar czf release/$(ARCHIVE) README.md LICENSE CHANGELOG.md -C release/ $(EXECUTABLE)
 	rm release/$(EXECUTABLE)
@@ -87,4 +108,3 @@ distribution:
 	GOARCH=arm make build archive
 	GOOS=darwin make build archive
 .PHONY: distribution
-
